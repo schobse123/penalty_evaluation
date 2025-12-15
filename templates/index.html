@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Player+ Strafenauswertung</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        h1 { text-align: center; color: #333; }
+        label { display: block; margin-top: 15px; font-weight: bold; }
+        input[type="text"], input[type="password"], input[type="date"], input[type="number"] { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { background-color: #007bff; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 20px; }
+        button:hover { background-color: #0056b3; }
+        .error { color: red; background-color: #ffe0e0; padding: 10px; border-radius: 4px; margin-top: 15px; }
+        .hint { font-size: 0.9em; color: #666; margin-top: 5px; }
+        fieldset { border: 1px solid #ddd; padding: 10px; margin-top: 20px; border-radius: 4px; }
+        legend { font-weight: bold; padding: 0 10px; color: #007bff; }
+    </style>
+</head>
+<body>
+    <h1>💸 Player+ Strafenauswertung</h1>
+
+    {% if error %}
+    <div class="error">
+        <strong>Fehler:</strong> {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/">
+        <fieldset>
+            <legend>Zugangsdaten</legend>
+            <div class="hint">Zum Login ist **entweder** Cookie **oder** Benutzername/Passwort nötig.</div>
+
+            <label for="cookie">Cookie-Header (Optional, Alternative zum Login)</label>
+            <input type="text" id="cookie" name="cookie" placeholder="Kompletter 'Cookie:' Header aus dem Browser">
+
+            <p style="text-align: center; margin: 15px 0;">— ODER —</p>
+
+            <label for="user">Login-Benutzername/E-Mail (<a href="{{ login_url }}" target="_blank">Player+ Login</a>)</label>
+            <input type="text" id="user" name="user" placeholder="E-Mail oder Benutzername">
+
+            <label for="password">Passwort</label>
+            <input type="password" id="password" name="password" placeholder="Passwort für Player+">
+        </fieldset>
+
+        <fieldset>
+            <legend>Auswertungs-Parameter</legend>
+            
+            <label for="startdatum">Startdatum (Format: JJJJ-MM-TT)</label>
+            <input type="date" id="startdatum" name="startdatum" required 
+                   placeholder="z.B. 2024-01-01">
+            <div class="hint">Es wird bis heute ausgewertet.</div>
+
+            <label for="max_pages">Maximale Seitenanzahl zum Laden (Standard: 20)</label>
+            <input type="number" id="max_pages" name="max_pages" value="20" min="1">
+            
+            <label style="margin-top: 10px;">
+                <input type="checkbox" id="with_de" name="with_de">
+                Meine Player+ URL enthält **`/de/`** (z.B. `/de/punishments/index`)
+            </label>
+        </fieldset>
+        
+        <button type="submit">Daten abrufen und CSV erstellen</button>
+    </form>
+</body>
+</html>

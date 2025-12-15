@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: playerplus_ui
+    # Bindet den Container-Port 5000 an den Host-Port 8080. 
+    # Benutzer können dann im Browser http://localhost:8080 aufrufen.
+    ports:
+      - "8080:5000"
+    # Setze Flask-Umgebungsvariable für den Start
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=development # Für Debugging-Ausgaben

@@ -5,6 +5,10 @@ import pandas as pd
 import re
 from datetime import datetime, date
 from getpass import getpass
+import os
+import zipfile
+from io import StringIO
+import sys
 
 # ================== CLI-ARGUMENTE ==========================
 
@@ -137,142 +141,198 @@ def normalize_euro(amount_str):
     except ValueError:
         return 0.0
 
+# ================== HILFSFUNKTIONEN FÜR FLASK ==========================
 
-# ================== HAUPTLOGIK =============================
+def create_zip_archive(files_to_zip: list, zip_filename: str):
+    """Erstellt ein ZIP-Archiv aus einer Liste von (Dateiname, Inhalt) Paaren."""
+    zip_path = os.path.join("temp_results", zip_filename)
+    
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for filename, content in files_to_zip:
+            # Speichert den Inhalt in einem io.BytesIO Puffer, um ihn in das ZIP zu schreiben
+            # ohne eine temporäre Datei auf der Festplatte zu erstellen
+            zf.writestr(filename, content)
+            
+    return zip_path
 
-def main():
-    args = parse_args()
 
-    if not args.cookie and not args.user:
-        raise SystemExit("Entweder --cookie ODER --user angeben.")
+# ================== HAUPTLOGIK FÜR FLASK =============================
 
-    start_date = parse_date_string(args.startdatum)
-    today = date.today()
-    print(f"Auswertung von {start_date.strftime('%d.%m.%Y')} bis {today.strftime('%d.%m.%Y')}")
+# Ersetzt die alte main()-Funktion
+def process_penalties(args, password_input):
+    
+    # -----------------------------------------------------------------
+    # Um die Konsolenausgaben (Prints) abzufangen, leiten wir stdout um
+    # Dies ist hilfreich, um Logs im Flask-Frontend anzuzeigen
+    old_stdout = sys.stdout
+    sys.stdout = output_capture = StringIO()
+    
+    # Pfad für das finale ZIP-Archiv
+    zip_filename = f"strafen_auswertung_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    
+    try:
+        # ------------------ START DER URSPRÜNGLICHEN LOGIK ------------------
+        
+        if not args.cookie and not args.user:
+            raise SystemExit("Entweder --cookie ODER --user angeben.")
 
-    # URL-Template je nach /de/-Variante
-    if args.with_de:
-        index_url_template = "https://player.plus/de/punishments/index?page={page}&per-page=25"
-    else:
-        index_url_template = "https://player.plus/punishments/index?page={page}&per-page=25"
+        # Datum parsen und ausgeben
+        start_date = parse_date_string(args.startdatum)
+        today = date.today()
+        print(f"Auswertung von {start_date.strftime('%d.%m.%Y')} bis {today.strftime('%d.%m.%Y')}")
 
-    # 1) Session vorbereiten
-    if args.cookie:
-        # Variante: Cookie-Header direkt verwenden
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X)",
-            "Cookie": args.cookie,
-        })
-    else:
-        # Variante: Login mit Username + Passwort
-        password = getpass("Passwort für player.plus: ")
-        session = login_with_credentials(args.user, password)
+        # URL-Template je nach /de/-Variante
+        if args.with_de:
+            index_url_template = "https://player.plus/de/punishments/index?page={page}&per-page=25"
+        else:
+            index_url_template = "https://player.plus/punishments/index?page={page}&per-page=25"
 
-    alle_eintraege = []
-    gesehene_keys = set()
+        # 1) Session vorbereiten
+        if args.cookie:
+            # Variante: Cookie-Header direkt verwenden
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X)",
+                "Cookie": args.cookie,
+            })
+        else:
+            # Variante: Login mit Username + Passwort
+            # HIER WIRD getpass() DURCH DIE ÜBERGABE VON FLASK ERSETZT!
+            password = password_input 
+            if not password:
+                raise SystemExit("Passwort fehlt für Login-Methode.")
+            
+            session = login_with_credentials(args.user, password)
 
-    for page in range(1, args.max_pages + 1):
-        url = index_url_template.format(page=page)
-        print(f"Seite {page} laden: {url}")
+        # 2) Daten scrapen
+        alle_eintraege = []
+        gesehene_keys = set()
 
-        resp = session.get(url)
-        # Wenn die Session abgelaufen ist oder Login nötig ist:
-        if resp.status_code == 403 or "Login" in resp.text[:300]:
-            raise SystemExit("Keine Berechtigung / Session abgelaufen – Cookie/Login prüfen.")
+        for page in range(1, args.max_pages + 1):
+            url = index_url_template.format(page=page)
+            print(f"Seite {page} laden: {url}")
+            
+            # ... (Rest der Scraping-Logik bleibt unverändert) ...
+            
+            resp = session.get(url)
+            if resp.status_code == 403 or "Login" in resp.text[:300]:
+                raise SystemExit("Keine Berechtigung / Session abgelaufen – Cookie/Login prüfen.")
 
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
 
-        items = soup.select("div.list-item[data-key]")
-        print(f"  -> {len(items)} Einträge gefunden")
+            items = soup.select("div.list-item[data-key]")
+            print(f"  -> {len(items)} Einträge gefunden")
 
-        if not items:
-            break
+            if not items:
+                break
 
-        neue_in_dieser_seite = 0
+            neue_in_dieser_seite = 0
 
-        for item in items:
-            key = item.get("data-key")
-            if not key:
-                continue
-            if key in gesehene_keys:
-                continue
-            gesehene_keys.add(key)
-            neue_in_dieser_seite += 1
+            for item in items:
+                key = item.get("data-key")
+                if not key:
+                    continue
+                if key in gesehene_keys:
+                    continue
+                gesehene_keys.add(key)
+                neue_in_dieser_seite += 1
 
-            # Spielername
-            label_el = item.select_one(".list-label")
-            spieler = label_el.get_text(strip=True) if label_el else None
+                label_el = item.select_one(".list-label")
+                spieler = label_el.get_text(strip=True) if label_el else None
 
-            # Datum + Beschreibung
-            sublabel_el = item.select_one(".list-sublabel")
-            sublabel_text = sublabel_el.get_text(" ", strip=True) if sublabel_el else ""
+                sublabel_el = item.select_one(".list-sublabel")
+                sublabel_text = sublabel_el.get_text(" ", strip=True) if sublabel_el else ""
 
-            # Datum im <b>...</b> in der list-sublabel
-            date_el = sublabel_el.find("b") if sublabel_el else None
-            datum_str = date_el.get_text(strip=True) if date_el else None
+                date_el = sublabel_el.find("b") if sublabel_el else None
+                datum_str = date_el.get_text(strip=True) if date_el else None
 
-            # Betrag: zuerst in list-value, falls vorhanden
-            value_el = item.select_one(".list-value")
-            value_text = value_el.get_text(" ", strip=True) if value_el else ""
+                value_el = item.select_one(".list-value")
+                value_text = value_el.get_text(" ", strip=True) if value_el else ""
 
-            betrag_raw = extract_amount(value_text, sublabel_text)
-            betrag = normalize_euro(betrag_raw)
+                betrag_raw = extract_amount(value_text, sublabel_text)
+                betrag = normalize_euro(betrag_raw)
 
-            alle_eintraege.append(
-                {
-                    "Key": key,
-                    "Spieler": spieler,
-                    "Datum": datum_str,
-                    "Beschreibung": sublabel_text,
-                    "Betrag_raw": betrag_raw,
-                    "Betrag": betrag,
-                }
+                alle_eintraege.append(
+                    {
+                        "Key": key,
+                        "Spieler": spieler,
+                        "Datum": datum_str,
+                        "Beschreibung": sublabel_text,
+                        "Betrag_raw": betrag_raw,
+                        "Betrag": betrag,
+                    }
+                )
+
+            print(f"  -> {neue_in_dieser_seite} neue eindeutige Einträge")
+
+            if neue_in_dieser_seite == 0:
+                break
+
+        if not alle_eintraege:
+            raise SystemExit("Keine Strafen gefunden. Stimmt die URL, sind Rechte vorhanden, ist Login/Cookie gültig?")
+
+        df = pd.DataFrame(alle_eintraege)
+
+        df["Datum_parsed"] = pd.to_datetime(
+            df["Datum"], format="%d.%m.%Y", errors="coerce"
+        ).dt.date
+
+        maske = (df["Datum_parsed"] >= start_date) & (df["Datum_parsed"] <= today)
+        df_filtered = df[maske].copy()
+
+        print(f"\nAnzahl Strafen im gewählten Zeitraum: {len(df_filtered)}")
+        
+        # 3) Dateierstellung und Zippen
+
+        files_for_zip = []
+        
+        # DataFrame 1: Gesamtliste (immer speichern, auch wenn leer)
+        csv_buffer_all = StringIO()
+        df.to_csv(csv_buffer_all, index=False, encoding="utf-8")
+        files_for_zip.append(("strafen_alle_eintraege_gesamt.csv", csv_buffer_all.getvalue()))
+        print("Gesamtliste gespeichert als strafen_alle_eintraege_gesamt.csv")
+        
+        if not df_filtered.empty:
+            summen = (
+                df_filtered.groupby("Spieler", as_index=False)["Betrag"]
+                .sum()
+                .rename(columns={"Betrag": "Summe"})
+                .sort_values("Summe", ascending=False)
             )
 
-        print(f"  -> {neue_in_dieser_seite} neue eindeutige Einträge")
+            print("\nStrafensumme pro Spieler (gefiltert):")
+            print(summen)
 
-        if neue_in_dieser_seite == 0:
-            break
+            # DataFrame 2: Gefilterte Liste
+            csv_buffer_filtered = StringIO()
+            df_filtered.to_csv(csv_buffer_filtered, index=False, encoding="utf-8")
+            files_for_zip.append(("strafen_alle_eintraege_gefiltert.csv", csv_buffer_filtered.getvalue()))
 
-    if not alle_eintraege:
-        raise SystemExit("Keine Strafen gefunden. Stimmt die URL, sind Rechte vorhanden, ist Login/Cookie gültig?")
+            # DataFrame 3: Summen
+            csv_buffer_summen = StringIO()
+            summen.to_csv(csv_buffer_summen, index=False, encoding="utf-8")
+            files_for_zip.append(("strafen_pro_spieler_gefiltert.csv", csv_buffer_summen.getvalue()))
 
-    df = pd.DataFrame(alle_eintraege)
-
-    df["Datum_parsed"] = pd.to_datetime(
-        df["Datum"], format="%d.%m.%Y", errors="coerce"
-    ).dt.date
-
-    maske = (df["Datum_parsed"] >= start_date) & (df["Datum_parsed"] <= today)
-    df_filtered = df[maske].copy()
-
-    print(f"\nAnzahl Strafen im gewählten Zeitraum: {len(df_filtered)}")
-
-    if df_filtered.empty:
-        print("Keine Strafen im angegebenen Zeitraum gefunden.")
-        df.to_csv("strafen_alle_eintraege_gesamt.csv", index=False, encoding="utf-8")
-        print("Gesamtliste gespeichert als strafen_alle_eintraege_gesamt.csv")
-        return
-
-    summen = (
-        df_filtered.groupby("Spieler", as_index=False)["Betrag"]
-        .sum()
-        .rename(columns={"Betrag": "Summe"})
-        .sort_values("Summe", ascending=False)
-    )
-
-    print("\nStrafensumme pro Spieler (gefiltert):")
-    print(summen)
-
-    df_filtered.to_csv("strafen_alle_eintraege_gefiltert.csv", index=False, encoding="utf-8")
-    summen.to_csv("strafen_pro_spieler_gefiltert.csv", index=False, encoding="utf-8")
-
-    print("\nDateien erstellt (gefiltert nach Zeitraum):")
-    print("  - strafen_alle_eintraege_gefiltert.csv")
-    print("  - strafen_pro_spieler_gefiltert.csv")
+            print("\nDateien erstellt (gefiltert nach Zeitraum):")
+            print("  - strafen_alle_eintraege_gefiltert.csv")
+            print("  - strafen_pro_spieler_gefiltert.csv")
 
 
-if __name__ == "__main__":
-    main()
+        # ZIP-Archiv erstellen
+        zip_filepath = create_zip_archive(files_for_zip, zip_filename)
+        print(f"\nAlle Ergebnisse erfolgreich in ZIP-Datei gespeichert: {zip_filepath}")
+        
+        # ------------------ ENDE DER LOGIK ------------------
+        
+        # Log-Output wiederherstellen und zurückgeben
+        sys.stdout = old_stdout
+        return zip_filepath, output_capture.getvalue()
+
+    except Exception as e:
+        # Bei Fehlern Log-Output wiederherstellen
+        sys.stdout = old_stdout
+        raise SystemExit(str(e)) from e
+
+
+
